@@ -1,0 +1,129 @@
+name: VTOP Monitor
+
+on:
+  schedule:
+    # Run every 6 hours (at 00:00, 06:00, 12:00, 18:00 UTC)
+    - cron: '0 */6 * * *'
+  
+  workflow_dispatch:  # Allow manual trigger from GitHub UI
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15  # Prevent hanging
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: Create .env file from secrets
+      run: |
+        echo "VTOP_USERNAME=${{ secrets.VTOP_USERNAME }}" >> .env
+        echo "VTOP_PASSWORD=${{ secrets.VTOP_PASSWORD }}" >> .env
+        echo "VTOP_SEMESTER_ID=${{ secrets.VTOP_SEMESTER_ID }}" >> .env
+        echo "CHECK_INTERVAL_HOURS=6" >> .env
+        echo "SEND_EMAIL_ALWAYS=${{ secrets.SEND_EMAIL_ALWAYS || 'false' }}" >> .env
+        echo "GMAIL_ENABLED=true" >> .env
+        echo "GMAIL_EMAIL=${{ secrets.GMAIL_EMAIL }}" >> .env
+        echo "GMAIL_APP_PASSWORD=${{ secrets.GMAIL_APP_PASSWORD }}" >> .env
+        echo "GMAIL_TO_EMAIL=${{ secrets.GMAIL_TO_EMAIL }}" >> .env
+    
+    - name: Verify secrets are set
+      run: |
+        if [ -z "${{ secrets.VTOP_USERNAME }}" ]; then
+          echo "Error: VTOP_USERNAME secret not set"
+          exit 1
+        fi
+        if [ -z "${{ secrets.VTOP_PASSWORD }}" ]; then
+          echo "Error: VTOP_PASSWORD secret not set"
+          exit 1
+        fi
+        if [ -z "${{ secrets.GMAIL_EMAIL }}" ]; then
+          echo "Error: GMAIL_EMAIL secret not set"
+          exit 1
+        fi
+        echo "All required secrets are set"
+    
+    - name: Download last state artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: last-state
+        path: .
+      continue-on-error: true
+    
+    - name: Initialize state files if not exist
+      run: |
+        # Create data directory
+        mkdir -p data
+        
+        # Create empty last_state.json if it doesn't exist
+        if [ ! -f "last_state.json" ]; then
+          echo '{}' > last_state.json
+          echo "Created empty last_state.json for first run"
+        else
+          echo "Found existing last_state.json"
+        fi
+        
+        # List current state
+        echo "Current state files:"
+        ls -lh last_state.json 2>/dev/null || echo "  No last_state.json"
+        ls -lh data/*.json 2>/dev/null || echo "  No data files yet"
+    
+    - name: Run single check
+      id: run_check
+      run: |
+        python watchdog.py --once 2>&1 | tee run.log
+        echo "exit_code=$?" >> $GITHUB_OUTPUT
+      continue-on-error: true
+    
+    - name: Check run status
+      run: |
+        if [ -f "run.log" ]; then
+          echo "=== Run Log ==="
+          cat run.log
+          
+          if grep -q "AUTHENTICATION SUCCESSFUL" run.log; then
+            echo "✓ Authentication successful"
+          elif grep -q "AUTHENTICATION FAILED" run.log; then
+            echo "✗ Authentication failed"
+            exit 1
+          elif grep -q "Error:" run.log; then
+            echo "✗ Error occurred during run"
+            exit 1
+          fi
+        else
+          echo "✗ No log file generated"
+          exit 1
+        fi
+    
+    - name: Upload last state artifact
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: last-state
+        path: |
+          last_state.json
+          data/
+        retention-days: 90
+        if-no-files-found: warn
+    
+    - name: Upload logs on failure
+      uses: actions/upload-artifact@v4
+      if: failure()
+      with:
+        name: error-logs
+        path: |
+          run.log
+          debug/*.html
+          debug/*.png
+        retention-days: 7

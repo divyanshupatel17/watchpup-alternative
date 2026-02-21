@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+
+# Model weights (large file)
+# vellore_weights.json
+
+# Credentials (never commit these!)
+*.env
+credentials.txt
+.credentials
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+credentials.json
+
+# Data files (contains personal information)
+data/
+data/*.json
+
+# State files
+last_state.json
+
+# Debug files
+debug/
+debug/*.html
+debug/*.png
